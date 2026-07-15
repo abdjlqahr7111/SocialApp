@@ -1,71 +1,139 @@
-name: Build Android APK
+name: Build Android APK (Manual Install)
 
 on:
   push:
-    branches: [ "main" ] # تأكد أنها main هنا
-
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
 
 jobs:
   build:
-    runs-on: macos-latest  <--- تم التعديل هنا
- سنستخدم خادم أوبونتو الأحدث للبناء
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install Qt
-        # هذه خطوة جاهزة من المجتمع لتثبيت Qt في بيئة الـ CI
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.5.2' # إصدار Qt المستخدم (يمكنك تغييره لـ 6.6.x إذا أردت الأحدث)
-          target: 'android' # الهدف هو أندرويد
-          arch: 'android_arm64' # المعمارية المستهدفة (أكثر الهواتف الحديثة تدعمها)
-          dir: ${{ github.workspace }}/Qt
-          # إذا كان مشروعك يستخدم مكتبات إضافية غير Core, Gui, Sql, Qml, Multimedia, Widgets
-          # قم بإضافتها هنا في خانة 'modules' مفصولة بفراغ، مثال: 'qtcharts qtsvg'
-          modules: 'qtmultimedia' 
-
-      - name: Set up Android NDK
-        # تحديد متغير البيئة لمسار NDK ليستخدمه CMake
+      - name: Install System Dependencies
         run: |
-          echo "ANDROID_NDK_ROOT=${{ github.workspace }}/Qt/6.5.2/android_arm64/ndk" >> $GITHUB_ENV
-          # هام: إصدار NDK الذي يثبته الـ install-qt-action قد يختلف قليلاً
-          # في أغلب الأحيان يتم اكتشافه تلقائياً، لكن هذا السطر احتياطي.
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full ninja-build default-jdk wget unzip git
 
-      - name: Configure CMake
-        # تنفيذ أمر تهيئة المشروع. تأكد أن ملف CMakeLists.txt في الجذر.
+      - name: Install Android SDK & NDK
+        # سنستخدم الأدوات الرسمية من جوجل لتثبيت SDK و NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Qt Manually
+        # هذه هي الخطوة الجديدة: تحميل وتثبيت Qt باستخدام المثبت الصامت
+        env:
+          QT_VERSION: '6.5.3'
+          QT_DIR: ${{ github.workspace }}/Qt
+          # قائمة المكونات الأساسية المطلوبة لبناء أندرويد
+          QT_MODULES: 'qtbase qtsql qtdeclarative qtquick3d qtmultimedia qt5compat'
+        run: |
+          echo "Downloading Qt Installer..."
+          wget -q https://download.qt.io/official_releases/online_installer/qt-unified-linux-x64-online.run -O qt-installer.run
+          chmod +x qt-installer.run
+          
+          # إنشاء ملف استجابة للتثبيت الصامت (لتجنب التدخل البشري)
+          cat <<EOF > installer-script.qs
+          function Controller() {
+              installer.autoRejectMessageBoxes();
+              installer.installationFinished.connect(function() {
+                  gui.clickButton(buttons.NextButton);
+              });
+          }
+
+          Controller.prototype.WelcomePageCallback = function() {
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.CredentialsPageCallback = function() {
+              gui.clickButton(buttons.CancelButton);
+          }
+
+          Controller.prototype.IntroductionPageCallback = function() {
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.TargetDirectoryPageCallback = function() {
+              gui.currentPage().targetDirectoryLineEdit.setText("${QT_DIR}");
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.PackageSelectionPageCallback = function() {
+              gui.clickButton(buttons.SelectAllButton);
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.LicenseAgreementPageCallback = function() {
+              gui.checkBoxByObjectName("AcceptLicense").checked = true;
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.StartMenuDirectoryPageCallback = function() {
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.ReadyForInstallationPageCallback = function() {
+              gui.clickButton(buttons.NextButton);
+          }
+
+          Controller.prototype.FinishedPageCallback = function() {
+              gui.clickButton(buttons.FinishButton);
+          }
+          EOF
+          
+          # تنفيذ التثبيت الصامت (تثبيت نسخة سطح المكتب فقط لتوليد الأدوات، ثم مكتبات أندرويد)
+          # نظراً لأن التثبيت الكامل بطيء، سنقوم بتثبيت qt.qt6.653.linux_64 و qt.qt6.653.android_arm64
+          # لكن لتسهيل الأمر، سنقوم بتثبيت أندرويد فقط مباشرة (قد يتطلب تثبيت qtbase أولاً)
+          # الحل الأسرع هو تثبيت نسخة Desktop compiler أولاً ثم إضافة Android target
+          
+          # محاولة تثبيت android_arm64 مباشرة (قد تفشل بدون تثبيت سطح المكتب أولاً)
+          # لذا سنقوم بتثبيت desktop و android معا
+          echo "Running Qt Installer (this may take a few minutes)..."
+          ./qt-installer.run --script installer-script.qs --platform minimal install --verbose \
+             -期の qt.qt6.653.gcc_64 \
+             -期 qt.qt6.653.android_arm64
+          
+          # هام: تصحيح مسارات التولتشين وملف qmake
+          echo "QMAKE_PATH=${QT_DIR}/${QT_VERSION}/gcc_64/bin/qmake" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+          # تصحيح مسار ndk cmake toolchain file ليتوافق مع الهيكلية الجديدة
+          # المسار في ndk هو toolchains/llvm/prebuilt/linux-x86_64/build/cmake/android.toolchain.cmake
+          echo "ANDROID_CMAKE_TOOLCHAIN=${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
+          
+          # تنظيف
+          rm qt-installer.run installer-script.qs
+
+      - name: Configure CMake (Manual Qt)
         run: |
           mkdir build_android
           cd build_android
+          # استخدام المسارات الجديدة المثبتة
           cmake .. \
             -GNinja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/Qt/6.5.2/android_arm64/ndk/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${ANDROID_CMAKE_TOOLCHAIN} \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.2/android_arm64/ \
-            -DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.3/android_arm64/ \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DQt6_DIR=${{ github.workspace }}/Qt/6.5.3/android_arm64/lib/cmake/Qt6
 
       - name: Build with Ninja
-        # بدء عملية البناء الفعلي
         run: |
           cd build_android
           cmake --build . --parallel $(nproc)
 
       - name: Find APK
         id: find_apk
-        # البحث عن ملف الـ APK الناتج
         run: |
-          # عادة ما يكون المسار التالي هو الصحيح في Qt6
           APK_PATH=$(find . -name "*.apk" | head -n 1)
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "Found APK at: $APK_PATH"
 
       - name: Upload APK as Artifact
-        # تحميل ملف الـ APK النهائي من خادم GitHub إلى جهازك
         uses: actions/upload-artifact@v4
         with:
-          name: SocialApp-Android-Debug
+          name: SocialApp-Android-Debug-Manual
           path: ${{ steps.find_apk.outputs.apk_path }}

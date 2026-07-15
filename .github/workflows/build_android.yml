@@ -9,7 +9,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # سنستخدم خادم أوبونتو الأحدث للبناء
+    runs-on: macos-latest  <--- تم التعديل هنا
+ سنستخدم خادم أوبونتو الأحدث للبناء
 
     steps:
       - name: Checkout code

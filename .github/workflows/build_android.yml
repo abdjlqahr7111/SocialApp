@@ -2,7 +2,8 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "master" ] # سيبدأ البناء تلقائياً عند الرفع إلى الفرع master
+    branches: [ "main" ] # تأكد أنها main هنا
+
   pull_request:
     branches: [ "master" ]
 

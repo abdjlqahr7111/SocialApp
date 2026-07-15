@@ -1,0 +1,11 @@
+{
+  "name": "socialapp",
+  "version": "1.0.0",
+  "dependencies": [
+    "qt6-base",
+    "qt6-multimedia",
+    "qt6-declarative",
+    "qt6-quickcontrols2",
+    "sqlite3"
+  ]
+}
